@@ -33,6 +33,7 @@ import re
 import sys
 from pathlib import Path
 from typing import Set
+import random
 from playwright.async_api import async_playwright
 import logging
 
@@ -49,12 +50,54 @@ MAX_PAGES = 2348
 # Имя выходного файла для сохранения ссылок
 OUTPUT_FILE = Path(__file__).parent / "book_links.txt"
 
+# ==============================================================================
+# НАСТРОЙКИ USER-AGENT
+# ==============================================================================
+
+# Список User-Agent ов реальных браузеров для ротации
+# Каждый запрос будет выглядеть как от другого браузера/устройства
+USER_AGENTS = [
+    # macOS Chrome
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    # macOS Safari
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+    # macOS Firefox
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:127.0) Gecko/20100101 Firefox/127.0",
+    # Windows Chrome
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    # Windows Edge
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0",
+    # Windows Firefox
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0",
+    # Linux Chrome
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+]
+
+
+def get_random_user_agent() -> str:
+    """
+    Возвращает случайный User-Agent из списка USER_AGENTS.
+
+    Зачем это нужно:
+        Сайты отслеживают User-Agent и могут заблокировать,
+        если все запросы идут с одного и того же.
+        Ротация User-Agent ов делает бота похожим на реальных
+        пользователей с разных устройств и браузеров.
+
+    Returns:
+        Строка с случайным User-Agent ом
+    """
+    return random.choice(USER_AGENTS)
+
+
 # Настройка логирования: показываем время, уровень и сообщение
 logging.basicConfig(
     level=logging.INFO,  # Уровень логирования (DEBUG, INFO, WARNING, ERROR)
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    force=True
 )
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 # ==============================================================================
@@ -140,47 +183,92 @@ def extract_book_links(html: str) -> Set[str]:
     if not html:
         return set()
     
-    # Регулярное выражение для поиска ссылок на книги
-    # Разбор паттерна:
-    #   /book/       - ищем_literalно "/book/"
-    #   [^\"<>\\s]+  - любое количество символов КРОМЕ кавычек, скобок и пробелов
-    #   -            - дефис (разделитель названия и ID)
-    #   \\d+         - одна или более цифр (ID книги)
-    #   +            - завершающий слеш
-    pattern = r'/book/[^\"<>\\s]+-\d+/'
+    # Ищем ВСЕ возможные форматы ссылок на книги
+    # Анализируем HTML разными способами для максимального охвата
     
-    # re.findall() возвращает все совпадения в виде списка
-    matches = re.findall(pattern, html)
+    # Способ 1: Классические ссылки /book/название-id/
+    pattern1 = re.compile(r'/book/[^"<>\s]+-\d+/')
+    matches1 = pattern1.findall(html)
     
-    # Преобразуем относительные ссылки в абсолютные
-    # Для каждого найденного совпадения добавляем https://ast.ru
-    # Используем set() для автоматического удаления дубликат��в
-    links = {f"https://ast.ru{m}" for m in matches}
+    # Способ 2: Ссылки /book/...-id без слеша в конце
+    pattern2 = re.compile(r'/book/[^"<>\s]+-\d+')
+    matches2 = pattern2.findall(html)
     
-    return links
+    # Способ 3: Ищем любые href со словом book внутри кавычек
+    pattern3 = re.compile(r'href="[^"]*book[^"]*"')
+    matches3 = pattern3.findall(html)
+    
+    # Объединяем все результаты и удаляем дубликаты
+    all_matches = set()
+    
+    # Добавляем совпадения из способов 1 и 2
+    for m in matches1 + matches2:
+        all_matches.add(f"https://ast.ru{m}")
+    
+    # Добавляем совпадения из способа 3 (извлекаем URL из href="...")
+    for m in matches3:
+        # Извлекаем URL из href="url"
+        url = m.replace('href="', '').replace('"', '')
+        if url.startswith("/"):
+            all_matches.add(f"https://ast.ru{url}")
+        elif url.startswith("http"):
+            all_matches.add(url)
+    
+    # Нормализуем и фильтруем ссылки
+    cleaned = set()
+    for link in all_matches:
+        # Убираем trailing slash для нормализации
+        normalized = link.rstrip("/")
+        
+        # Оставляем ТОЛЬКО ссылки на книги формата /book/...-id
+        # Отбрасываем:
+        #   - /cat/audiobooks/  (аудиокниги)
+        #   - /cat/ebooks/      (электронные книги)
+        #   - /cat/...          (любые другие категории)
+        #   - любые ссылки без /book/ в пути
+        if "/book/" not in normalized:
+            continue
+        
+        # Проверяем, что это именно ссылка на книгу (содержит ID)
+        # Формат: https://ast.ru/book/название-id
+        if not re.search(r'/book/[^/]+-\d+$', normalized):
+            continue
+        
+        cleaned.add(normalized)
+    
+    # Возвращаем нормализованные ссылки
+    return {link + "/" for link in cleaned}
+
 
 
 # ==============================================================================
 # ФУНКЦИИ ДЛЯ ЗАГРУЗКИ СТРАНИЦ
 # ==============================================================================
 
-async def fetch_page(page, page_num: int) -> str | None:
+async def fetch_page(browser, page_num: int) -> str | None:
     """
     Загружает одну страницу каталога и возвращает её HTML.
-    
+
     Как это работает:
-        1. Формирует URL с параметром ?PAGEN_1=N (Bitrix пагинация)
-        2. Открывает страницу в браузере (Playwright)
-        3. Ждёт 3 секунды для полной загрузки контента
-        4. Возвращает HTML-код страницы
-    
+        1. Создаёт новый контекст браузера со случайным User-Agent'ом
+        2. Формирует URL с параметром ?PAGEN_1=N (Bitrix пагинация)
+        3. Открывает страницу в браузере (Playwright)
+        4. Ждёт случайную задержку для полной загрузки контента
+        5. Закрывает контекст (чтобы каждый запрос был как новый пользователь)
+        6. Возвращает HTML-код страницы
+
+    Зачем новый контекст для каждой страницы:
+        - Каждый контекст имеет свой User-Agent (имитация разных устройств)
+        - Контекст не хранит cookies/сессии между страницами
+        - Сайт видит каждый запрос как от нового посетителя
+
     Args:
-        page: Объект страницы Playwright
+        browser: Объект браузера Playwright (chromium)
         page_num: Номер страницы каталога для загрузки
-        
+
     Returns:
         HTML-код страницы или None в случае ошибки
-        
+
     Пример URL:
         Страница 1: https://ast.ru/cat/khudozhestvennaya-literatura/?PAGEN_1=1
         Страница 50: https://ast.ru/cat/khudozhestvennaya-literatura/?PAGEN_1=50
@@ -188,23 +276,100 @@ async def fetch_page(page, page_num: int) -> str | None:
     # Формируем URL страницы
     # ?PAGEN_1= - параметр пагинации для Bitrix (CMS сайта)
     url = f"{BASE_URL}?PAGEN_1={page_num}"
-    
+
     try:
-        # Переходим по URL
-        # timeout=60000 - таймаут 60 секунд на загрузку
-        await page.goto(url, timeout=60000)
+        logger.info(f"Страница {page_num}: Начинаю загрузку {url}")
+
+        # Создаём НОВЫЙ контекст браузера со случайным User-Agent'ом
+        # Это ключевой момент: каждый запрос выглядит как от другого пользователя
+        ua = get_random_user_agent()
+        logger.info(f"Страница {page_num}: User-Agent: {ua[:50]}...")
         
-        # Ждём 3 секунды, чтобы JavaScript успел загрузить контент
-        # Это необходимо, так как сайт использует динамическую загрузку
-        await asyncio.sleep(3)
-        
+        # Создаём контекст с большим viewport (1920x1080)
+        # Чем больше viewport, тем больше контента сайт может загрузить сразу
+        context = await browser.new_context(
+            user_agent=ua,
+            viewport={"width": 1920, "height": 1080}
+        )
+
+        # Создаём новую страницу (вкладку) в этом контексте
+        page = await context.new_page()
+
+        # Переходим по URL с ожиданием полной загрузки
+        # networkidle - ждём, пока не останется сетевых запросов
+        # timeout=90000 - таймаут 90 секунд на загрузку
+        await page.goto(url, timeout=90000, wait_until="networkidle")
+        logger.info(f"Страница {page_num}: Загружена, жду рендеринг...")
+
+        # Ждём 2–4 секунды для полной загрузки JavaScript контента
+        await asyncio.sleep(random.uniform(2.0, 4.0))
+
+        # Прокручиваем страницу, чтобы активировать lazy loading
+        await scroll_page(page, page_num)
+
+        # Дополнительное ожидание для подгрузки контента после скролла
+        await asyncio.sleep(random.uniform(1.0, 2.0))
+
         # Получаем HTML-код страницы после рендеринга
-        return await page.content()
-        
+        html = await page.content()
+        logger.info(f"Страница {page_num}: HTML получен ({len(html)} байт)")
+
+        # Закрываем контекст (вместе с cookies, сессией, кэшем)
+        await context.close()
+
+        return html
+
     except Exception as e:
         # Логируем ошибку, но не прерываем парсинг
         logger.error(f"Страница {page_num}: Ошибка загрузки - {e}")
         return None
+
+
+async def scroll_page(page, page_num: int):
+    """
+    Плавно прокручивает страницу сверху вниз мелкими шагами,
+    чтобы активировать ленивую загрузку (lazy loading) книг.
+
+    ast.ru использует динамическую подгрузку контента при скролле.
+    Без скролла парсер видит только первые 5-9 книг.
+    С правильным скроллом — все 20-40 книг на странице.
+
+    Как это работает:
+        1. Прокручиваем страницу на 600px (половина экрана)
+        2. Ждём 200-500ms, чтобы контент успел загрузиться
+        3. Повторяем, пока не дойдём до самого низа
+        4. Делаем 3 прохода для гарантии полной загрузки
+
+    Args:
+        page: Объект страницы Playwright
+        page_num: Номер страницы (только для логирования)
+    """
+    # Делаем 3 прохода скролла для гарантии полной загрузки
+    for pass_num in range(3):
+        await page.evaluate("""
+            async () => {
+                const totalHeight = document.body.scrollHeight;
+                const step = 600;  // шаг 600px для более плавного скролла
+                let currentPosition = 0;
+
+                // Скролл вниз мелкими шагами
+                while (currentPosition < totalHeight) {
+                    window.scrollTo(0, currentPosition);
+                    await new Promise(r => setTimeout(r, 200));
+                    currentPosition += step;
+                }
+
+                // Дополнительная пауза внизу
+                await new Promise(r => setTimeout(r, 400));
+
+                // Скролл наверх для следующего прохода
+                window.scrollTo(0, 0);
+                await new Promise(r => setTimeout(r, 200));
+            }
+        """)
+        logger.info(f"Страница {page_num}: Проход скролла {pass_num + 1}/3 завершён")
+
+    logger.info(f"Страница {page_num}: Скролл полностью завершён")
 
 
 # ==============================================================================
@@ -252,29 +417,24 @@ async def main():
         logger.info(f"Загружено {len(all_links)} существующих ссылок из файла")
     
     # Запускаем Playwright для автоматизации браузера
+    logger.info("Запускаю Playwright...")
     async with async_playwright() as p:
         # Запускаем Chromium в безголовом режиме ( headless=True )
         # Безголовый режим работает быстрее и не показывает окно браузера
-        browser = await p.chromium.launch(headless=True)
-        
-        # Создаём новую страницу (вкладку) в браузере
-        page = await browser.new_page()
+        logger.info("Запускаю браузер Chromium...")
+        browser = await p.chromium.launch(
+            headless=True  # headless=True - безголовый режим (без окна браузера)
+        )
+
+        logger.info("Браузер готов, начинаю парсинг...")
+        logger.info("Для каждой страницы будет создан новый контекст со случайным User-Agent")
+        logger.info("Это имитирует поведение разных пользователей с разных устройств")
         
         # Проходим по каждой странице каталога
         for page_num in range(start_page, end_page + 1):
             
-            # Каждые 50 страниц логируем прогресс
-            current_num = page_num - start_page + 1
-            if current_num % 50 == 0:
-                logger.info(f"Прогресс: {current_num}/{total_pages} страниц обработано")
-                
-                # Промежуточное сохранение (на случай прерывания)
-                with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
-                    for link in sorted(all_links):
-                        f.write(f"{link}\n")
-            
             # Загружаем страницу и получаем HTML
-            html = await fetch_page(page, page_num)
+            html = await fetch_page(browser, page_num)
             
             # Если страница загрузилась успешно - извлекаем ссылки
             if html:
@@ -285,13 +445,22 @@ async def main():
                 all_links.update(links)
                 
                 # Логируем результат (только для отладки)
-                logger.debug(f"Страница {page_num}: +{len(links)} ссылок (всего: {len(all_links)})")
+                logger.info(f"Страница {page_num}: +{len(links)} ссылок (всего: {len(all_links)})")
             
-            # Пауза 1 секунда между запросами
+            # Каждые 10 страниц — логируем прогресс и сохраняем промежуточный результат
+            current_num = page_num - start_page + 1
+            if current_num % 10 == 0:
+                logger.info(f"Прогресс: {current_num}/{total_pages} страниц обработано")
+                
+                # Промежуточное сохранение (на случай прерывания)
+                with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+                    for link in sorted(all_links):
+                        f.write(f"{link}\n")
+            
+            # Случайная пауза 2–5 секунд между запросами
             # Это важно, чтобы не нагружать сервер и не получить бан
-            await asyncio.sleep(1)
-        
-        # Закрываем браузер после завершения
+            # Случайное значение имитирует поведение реального пользователя
+            await asyncio.sleep(random.uniform(2.0, 5.0))
         await browser.close()
     
     # Финальное сохранение всех ссылок в файл

@@ -4,9 +4,11 @@
 
 - отвечай только на русском языке
 - оставляй много комментариев в коде на русском языке
+- система macBook pro m4 pro
+- 
 
 # Активируем виртуальное окружение
-source venv/bin/activate.fish  # для macOS/Linux
+source venv/bin/activate.fish  # для macOS
 
 ## Активация парсера
 # Запустить полный парсинг (2348 страниц)
@@ -17,3 +19,15 @@ python3 ast_parser.py 1 5
 
 # Первые 5 страниц
 python3 ast_parser.py 5
+
+# Нужные данные 
+"title"
+"author"
+"isbn"
+"description"
+"year"
+"pages"
+"cover"
+"series"
+"thickness"
+"format"
