@@ -1,12 +1,28 @@
 # Проект для парсинга книг с сайта ast.ru
 
+# Все 2355 страниц (полный парсинг)
+nohup python3 -u ast_parser.py 1 2355 -w 5 > parse.log 2>&1 &
+# Только 1-500
+nohup python3 -u ast_parser.py 1 500 -w 5 > parse.log 2>&1 &
+# Только 500-1000
+nohup python3 -u ast_parser.py 500 1000 -w 5 > parse.log 2>&1 &
+# 1000-1500 + перемешанный порядок (снижает нагрузку на сервер)
+nohup python3 -u ast_parser.py 1000 1500 -w 5 --shuffle > parse.log 2>&1 &
+# 1500-2355
+nohup python3 -u ast_parser.py 1500 2355 -w 5 > parse.log 2>&1 &
+
 ## Очень важно
 
 - отвечай только на русском языке
 - оставляй много комментариев в коде на русском языке
 - система macBook pro m4 pro
 - 
-
+## новый
+python3 ast_parser.py                          # все 2348 страниц, 5 воркеров
+python3 ast_parser.py 100                      # первые 100 страниц
+python3 ast_parser.py 10 50                    # страницы 10-50
+python3 ast_parser.py 10 50 -w 8               # диапазон + 8 воркеров
+python3 ast_parser.py 1 100 -w 10 --shuffle    # 10 воркеров + перемешанный порядок
 # Активируем виртуальное окружение
 source venv/bin/activate.fish  # для macOS
 
@@ -41,7 +57,7 @@ python3 -m worker --input sparseno/book_links1111.txt
 # С параметрами (рекомендуется для 1М URL):
 python3 -m worker --input sparseno/book_links.txt \
     --concurrency 50 \
-    --output books100.jsonl \
+    --output books100.json \
     --limit 100 \
     --pretty
     --timeout 60
