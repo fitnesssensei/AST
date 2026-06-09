@@ -4,20 +4,24 @@
 # Парсер ссылок на карточки товаров (книг) с сайта издательства АСТ
 # Собирает все URL книг по заданной категории и сохраняет их в текстовый файл
 #
-# Однопоточная версия (зеркалит eksmo_links_parser.py без многопоточности):
+# Многопоточная версия (зеркалит eksmo_links_parser.py):
 #   - класс-парсер с методами init / get_page / parse_book_list /
 #     find_next_page / parse_category_page / save_links_to_txt / collect_all_links
 #   - набор USER_AGENTS - список словарей с ПОЛНЫМИ заголовками
-#     (5 разных браузеров: Chrome / Firefox / Safari / Edge / Linux-Chrome)
+#     (10 разных браузеров: Chrome / Firefox / Safari / Edge / Linux-Chrome
+#      + Android / iOS / Ubuntu-Firefox / macOS-Chrome / Windows-Edge)
 #   - get_random_headers() возвращает КОПИЮ случайного словаря заголовков
 #   - sentinel _NOT_FOUND - сигнал «страница закончилась» (404/410)
 #   - на 404/410 НЕ повторяем запрос, сразу отдаём sentinel
 #   - промежуточное сохранение каждые links_save_page_interval страниц
+#   - многопоточный обход: N воркеров берут задачи (page_url, page_num)
+#     из общей очереди, обрабатывают и кладут следующую страницу
 #
 # Технологии:
 #   - requests.Session - ast.ru отдаёт каталог с серверным рендером
 #   - re: для извлечения ссылок на книги из HTML
-#   - argparse: CLI с --start-page / --end-page / --max-books
+#   - threading + queue.Queue: пул воркеров-страниц
+#   - argparse: CLI с --start-page / --end-page / --max-books / --page-workers
 
 import re
 import os
@@ -25,7 +29,9 @@ import sys
 import time
 import random
 import argparse
+import threading
 from pathlib import Path
+from queue import Queue, Empty
 from urllib.parse import urljoin
 
 import requests
@@ -41,7 +47,7 @@ BASE_URL = "https://ast.ru/cat/khudozhestvennaya-literatura/"
 MAX_PAGES = 2355
 
 # Имя выходного файла для сохранения ссылок
-OUTPUT_FILE = Path(__file__).parent / "ast.txt"
+OUTPUT_FILE = Path(__file__).parent / "ast1000.txt"
 
 # ==============================================================================
 # НАСТРОЙКИ
@@ -229,12 +235,12 @@ def safe_print(*args, **kwargs):
 # ==============================================================================
 
 class AstLinksParser:
-    """Класс для однопоточного сбора ссылок на карточки книг с сайта АСТ.
+    """Класс для многопоточного сбора ссылок на карточки книг с сайта АСТ.
 
-    Архитектурно зеркалит EksmoLinksParser, но без многопоточности:
+    Архитектурно зеркалит EksmoLinksParser:
         - те же имена и сигнатуры ключевых методов
         - те же «контракты» возвращаемых значений (sentinel _NOT_FOUND)
-        - простой последовательный обход страниц в collect_all_links
+        - многопоточный обход страниц через Queue + N воркеров
 
     Технические особенности (обусловлены спецификой ast.ru):
         - Внутри используется requests (а не Playwright) - ast.ru отдаёт каталог
@@ -251,7 +257,7 @@ class AstLinksParser:
         Сохраняем имена атрибутов близкими к eksmo_links_parser.py:
             - session
             - base_url
-            - print_lock (оставлен для совместимости, но больше не используется)
+            - print_lock (используется для потокобезопасной печати)
             - links_save_page_interval
             - links_filename
         """
@@ -268,9 +274,8 @@ class AstLinksParser:
         })
 
         self.base_url = BASE_URL
-        # Атрибут оставлен для совместимости сигнатуры с EksmoLinksParser,
-        # но в однопоточном режиме не используется.
-        self.print_lock = None
+        # Лок для потокобезопасной печати (используется в воркерах)
+        self.print_lock = threading.Lock()
         # Интервал промежуточного сохранения
         self.links_save_page_interval = LINKS_SAVE_PAGE_INTERVAL
         # Имя выходного файла
@@ -306,25 +311,28 @@ class AstLinksParser:
             # Берём новый случайный набор заголовков на КАЖДОЙ попытке
             headers = get_random_headers()
             try:
-                response = self.session.get(url, headers=headers, timeout=10)
+                response = self.session.get(url, headers=headers, timeout=30)
                 # 404/410: страница закончилась - НЕ повторяем
                 if response.status_code in (404, 410):
                     ua_short = headers["User-Agent"].split(") ")[0]
-                    safe_print(
-                        f"  ⚠ {response.status_code} для {url} "
-                        f"(страница не существует) UA: ...{ua_short})"
-                    )
+                    with self.print_lock:
+                        print(
+                            f"  ⚠ {response.status_code} для {url} "
+                            f"(страница не существует) UA: ...{ua_short})"
+                        )
                     return _NOT_FOUND
                 response.raise_for_status()
                 response.encoding = "utf-8"
                 ua_short = headers["User-Agent"].split(") ")[0]
-                safe_print(
-                    f"  → UA: ...{ua_short}) [попытка {attempt + 1}]"
-                )
+                with self.print_lock:
+                    print(
+                        f"  → UA: ...{ua_short}) [попытка {attempt + 1}]"
+                    )
                 return response
             except requests.RequestException as e:
                 last_exc = e
-                safe_print(f"Попытка {attempt + 1} не удалась для {url}: {e}")
+                with self.print_lock:
+                    print(f"Попытка {attempt + 1} не удалась для {url}: {e}")
                 if attempt < max_retries - 1:
                     time.sleep(random.uniform(0.1, 0.5))
                 else:
@@ -350,7 +358,8 @@ class AstLinksParser:
             list[str] | _NOT_FOUND: список уникальных URL книг или sentinel.
         """
         url = f"{self.base_url}?PAGEN_1={page_num}"
-        safe_print(f"Загрузка страницы: {url}")
+        with self.print_lock:
+            print(f"Загрузка страницы: {url}")
         response = self.get_page(url)
 
         # 404/410: страница не существует - отдаём маркер
@@ -358,7 +367,8 @@ class AstLinksParser:
             return _NOT_FOUND
 
         if not response:
-            safe_print("Не удалось загрузить страницу категории")
+            with self.print_lock:
+                print("Не удалось загрузить страницу категории")
             return []
 
         # Главное и единственное надёжное правило: ищем href=".../book/..."
@@ -397,7 +407,8 @@ class AstLinksParser:
             cleaned.add(f"https://ast.ru{book_path}/")
 
         book_links = list(cleaned)
-        safe_print(f"Найдено {len(book_links)} ссылок на книги")
+        with self.print_lock:
+            print(f"Найдено {len(book_links)} ссылок на книги")
         return book_links
 
     # ==========================================================================
@@ -452,16 +463,18 @@ class AstLinksParser:
 
             # parse_book_list мог вернуть _NOT_FOUND
             if book_links is _NOT_FOUND:
-                safe_print(
-                    f"[Страница {page_num}] 404/410: "
-                    f"категория закончилась ({page_url})"
-                )
+                with self.print_lock:
+                    print(
+                        f"[Страница {page_num}] 404/410: "
+                        f"категория закончилась ({page_url})"
+                    )
                 return _NOT_FOUND
 
             if not book_links:
-                safe_print(
-                    f"[Страница {page_num}] Ссылки на книги не найдены"
-                )
+                with self.print_lock:
+                    print(
+                        f"[Страница {page_num}] Ссылки на книги не найдены"
+                    )
                 # Возвращаем dict с пустым списком
                 return {
                     "page_num": page_num,
@@ -470,7 +483,8 @@ class AstLinksParser:
                     "next_url": self.find_next_page(page_url, page_num),
                 }
 
-            safe_print(f"[Страница {page_num}] Найдено книг: {len(book_links)}")
+            with self.print_lock:
+                print(f"[Страница {page_num}] Найдено книг: {len(book_links)}")
 
             return {
                 "page_num": page_num,
@@ -480,9 +494,10 @@ class AstLinksParser:
             }
 
         except Exception as e:
-            safe_print(
-                f"[Страница {page_num}] Ошибка при парсинге {page_url}: {e}"
-            )
+            with self.print_lock:
+                print(
+                    f"[Страница {page_num}] Ошибка при парсинге {page_url}: {e}"
+                )
             return None
 
     # ==========================================================================
@@ -505,10 +520,11 @@ class AstLinksParser:
         with open(filename, "w", encoding="utf-8") as f:
             for link in links:
                 f.write(link + "\n")
-        safe_print(f"Ссылки сохранены в файл: {filename} (всего: {len(links)})")
+        with self.print_lock:
+            print(f"Ссылки сохранены в файл: {filename} (всего: {len(links)})")
 
     # ==========================================================================
-    # СБОР ССЫЛОК (однопоточный)
+    # СБОР ССЫЛОК (многопоточный)
     # ==========================================================================
 
     def collect_all_links(
@@ -517,11 +533,12 @@ class AstLinksParser:
         start_page=1,
         end_page=None,
         max_books=None,
-        page_workers=None,
+        page_workers=10,
     ):
-        """Однопоточный сбор всех ссылок на книги из категории.
+        """Многопоточный сбор всех ссылок на книги из категории.
 
-        Зеркалит EksmoLinksParser.collect_all_links (без многопоточности):
+        Зеркалит EksmoLinksParser.collect_all_links (многопоточная версия):
+            - N воркеров берут задачи (page_url, page_num) из page_queue
             - sentinel _NOT_FOUND останавливает обход
             - промежуточное сохранение каждые links_save_page_interval страниц
             - при max_books - обрезаем результат и останавливаем обход
@@ -532,61 +549,118 @@ class AstLinksParser:
             start_page (int): Номер первой страницы (по умолчанию 1).
             end_page (int, optional): Номер последней страницы (по умолчанию MAX_PAGES).
             max_books (int, optional): Максимум собранных уникальных ссылок.
-            page_workers (int, optional): Игнорируется (однопоточный режим),
-                оставлен для совместимости сигнатуры.
+            page_workers (int): Количество потоков для сбора страниц (по умолчанию 10).
 
         Returns:
             list: Уникальные URL книг.
         """
-        if end_page is None:
-            end_page = MAX_PAGES
-
+        page_queue = Queue()
         all_book_links = []
+        all_book_links_lock = threading.Lock()
         processed_pages = 0
-        page_num = start_page
+        processed_pages_lock = threading.Lock()
+        collection_done = threading.Event()
+        active_tasks = [0]
+        active_tasks_lock = threading.Lock()
+
+        first_url = f"{self.base_url}?PAGEN_1={start_page}"
+        page_queue.put((first_url, start_page))
+        with active_tasks_lock:
+            active_tasks[0] += 1
+
+        def page_worker():
+            nonlocal processed_pages, all_book_links, collection_done
+
+            while True:
+                try:
+                    try:
+                        page_url, page_num = page_queue.get(timeout=1)
+                    except Empty:
+                        if collection_done.is_set():
+                            break
+                        continue
+
+                    with self.print_lock:
+                        print(f"\n{'=' * 60}")
+                        print(f"СБОР ССЫЛОК СО СТРАНИЦЫ {page_num}: {page_url}")
+                        print(f"{'=' * 60}")
+
+                    result = self.parse_category_page(page_url, page_num)
+
+                    # 404/410 - категория закончилась, останавливаем обход
+                    if result is _NOT_FOUND:
+                        with self.print_lock:
+                            print(
+                                f"[Страница {page_num}] ⛔ Категория закончилась "
+                                f"(404). Останавливаем обход."
+                            )
+                        collection_done.set()
+                        with active_tasks_lock:
+                            active_tasks[0] -= 1
+                        page_queue.task_done()
+                        try:
+                            while True:
+                                page_queue.get_nowait()
+                                page_queue.task_done()
+                        except Empty:
+                            pass
+                        break
+
+                    if result and result["book_links"]:
+                        with all_book_links_lock:
+                            all_book_links.extend(result["book_links"])
+                            if max_books and len(all_book_links) > max_books:
+                                all_book_links = all_book_links[:max_books]
+                                collection_done.set()
+
+                        with processed_pages_lock:
+                            processed_pages += 1
+
+                        if page_num % self.links_save_page_interval == 0:
+                            with all_book_links_lock:
+                                current_links = list(all_book_links)
+                            self.save_links_to_txt(current_links)
+
+                        if result["next_url"] and not collection_done.is_set():
+                            next_page_num = page_num + 1
+                            if end_page is not None and next_page_num > end_page:
+                                with self.print_lock:
+                                    print(
+                                        f"[Страница {page_num}] Достигнут лимит страницы "
+                                        f"{end_page}, останавливаемся"
+                                    )
+                            else:
+                                with all_book_links_lock:
+                                    if not max_books or len(all_book_links) < max_books:
+                                        page_queue.put((result["next_url"], next_page_num))
+                                        with active_tasks_lock:
+                                            active_tasks[0] += 1
+
+                    with active_tasks_lock:
+                        active_tasks[0] -= 1
+                    page_queue.task_done()
+
+                except Exception as e:
+                    with self.print_lock:
+                        print(f"Ошибка в worker: {e}")
+                    continue
+
+        workers = []
+        for _ in range(page_workers):
+            t = threading.Thread(target=page_worker, daemon=True)
+            t.start()
+            workers.append(t)
 
         while True:
-            if end_page is not None and page_num > end_page:
-                safe_print(
-                    f"[Страница {page_num}] Достигнут лимит страницы {end_page}, "
-                    f"останавливаемся"
-                )
+            with active_tasks_lock:
+                current_active = active_tasks[0]
+            if current_active == 0 and page_queue.empty():
                 break
+            time.sleep(0.5)
 
-            page_url = f"{self.base_url}?PAGEN_1={page_num}"
-
-            safe_print(f"\n{'=' * 60}")
-            safe_print(f"СБОР ССЫЛОК СО СТРАНИЦЫ {page_num}: {page_url}")
-            safe_print(f"{'=' * 60}")
-
-            result = self.parse_category_page(page_url, page_num)
-
-            # 404/410 - категория закончилась, останавливаем обход
-            if result is _NOT_FOUND:
-                safe_print(
-                    f"[Страница {page_num}] ⛔ Категория закончилась "
-                    f"(404). Останавливаем обход."
-                )
-                break
-
-            if result and result["book_links"]:
-                all_book_links.extend(result["book_links"])
-
-                if max_books and len(all_book_links) > max_books:
-                    all_book_links = all_book_links[:max_books]
-                    safe_print(
-                        f"Достигнут лимит max_books={max_books}, "
-                        f"останавливаем обход"
-                    )
-                    break
-
-                processed_pages += 1
-
-                if processed_pages % self.links_save_page_interval == 0:
-                    self.save_links_to_txt(list(all_book_links))
-
-            # Переходим к следующей странице
-            page_num += 1
+        collection_done.set()
+        for t in workers:
+            t.join(timeout=5)
 
         return all_book_links
 
@@ -598,8 +672,8 @@ class AstLinksParser:
 def main():
     """Главная функция для сбора ссылок на книги с сайта АСТ.
 
-    CLI (однопоточный режим):
-        --start-page, --end-page, --max-books
+    CLI (многопоточный режим):
+        --start-page, --end-page, --max-books, --page-workers
     Плюс обратная совместимость с позиционными аргументами:
         python3 ast_parser.py            # все страницы
         python3 ast_parser.py 100        # с 1 по 100
@@ -615,6 +689,7 @@ def main():
   %(prog)s --end-page 10                            # страницы 1-10
   %(prog)s --start-page 5 --end-page 15             # страницы 5-15
   %(prog)s --max-books 500                          # не более 500 ссылок
+  %(prog)s --page-workers 5                         # 5 потоков
         """,
     )
     parser.add_argument(
@@ -636,6 +711,10 @@ def main():
     parser.add_argument(
         "--max-books", type=int, default=48000,
         help="Максимальное количество собираемых ссылок (по умолчанию: 48000)"
+    )
+    parser.add_argument(
+        "--page-workers", type=int, default=10,
+        help="Количество потоков для сбора страниц (по умолчанию: 10)"
     )
 
     args = parser.parse_args()
@@ -661,11 +740,13 @@ def main():
         else:
             safe_print(" и до последней")
     safe_print(f"Максимальное количество книг: {args.max_books}")
+    safe_print(f"Количество потоков: {args.page_workers}")
 
     links = parser_obj.collect_all_links(
         start_page=start_page,
         end_page=end_page,
         max_books=args.max_books,
+        page_workers=args.page_workers,
     )
     parser_obj.save_links_to_txt(links)
     safe_print(f"Сбор завершён. Всего собрано ссылок: {len(links)}")
