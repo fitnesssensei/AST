@@ -47,7 +47,7 @@ BASE_URL = "https://ast.ru/cat/khudozhestvennaya-literatura/"
 MAX_PAGES = 2355
 
 # Имя выходного файла для сохранения ссылок
-OUTPUT_FILE = Path(__file__).parent / "ast1000.txt"
+OUTPUT_FILE = Path(__file__).parent / "ast3000.txt"
 
 # ==============================================================================
 # НАСТРОЙКИ
