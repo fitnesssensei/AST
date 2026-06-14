@@ -41,13 +41,16 @@ import requests
 # ==============================================================================
 
 # Базовый URL каталога художественной литературы
-BASE_URL = "https://ast.ru/cat/khudozhestvennaya-literatura/"
+#BASE_URL = "https://ast.ru/cat/khudozhestvennaya-literatura/"
+#BASE_URL = "https://ast.ru/cat/biografii-i-memuary/"
+#BASE_URL = "https://ast.ru/cat/graficheskiy-roman-komiks/"
+BASE_URL = "https://ast.ru/cat/detyam-i-roditelyam/"
 
 # Всего страниц в каталоге (по данным сайта, см. PAGEN_1=2355 в пагинации)
 MAX_PAGES = 2355
 
 # Имя выходного файла для сохранения ссылок
-OUTPUT_FILE = Path(__file__).parent / "ast3000.txt"
+OUTPUT_FILE = Path(__file__).parent / "deti.txt"
 
 # ==============================================================================
 # НАСТРОЙКИ
