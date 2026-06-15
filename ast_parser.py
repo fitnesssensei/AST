@@ -52,13 +52,16 @@ import requests
 #BASE_URL = "https://ast.ru/cat/iskusstvo-i-kultura/"
 #BASE_URL = "https://ast.ru/cat/istoricheskaya-i-voennaya-literatura/"
 #BASE_URL = "https://ast.ru/cat/zdorove-krasota-sport/"
-BASE_URL = "https://ast.ru/cat/eda-i-napitki/"
+#BASE_URL = "https://ast.ru/cat/eda-i-napitki/"
+#BASE_URL = "https://ast.ru/cat/astrologiya-ezoterika/"
+#BASE_URL = "https://ast.ru/cat/khobbi-i-dosug/"
+BASE_URL = "https://ast.ru/cat/dom-sad-ogorod/"
 
 # Всего страниц в каталоге (по данным сайта, см. PAGEN_1=2355 в пагинации)
 MAX_PAGES = 2355
 
 # Имя выходного файла для сохранения ссылок
-OUTPUT_FILE = Path(__file__).parent / "eda88.txt"
+OUTPUT_FILE = Path(__file__).parent / "ogorod107.txt"
 
 # ==============================================================================
 # НАСТРОЙКИ
