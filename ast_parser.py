@@ -44,13 +44,21 @@ import requests
 #BASE_URL = "https://ast.ru/cat/khudozhestvennaya-literatura/"
 #BASE_URL = "https://ast.ru/cat/biografii-i-memuary/"
 #BASE_URL = "https://ast.ru/cat/graficheskiy-roman-komiks/"
-BASE_URL = "https://ast.ru/cat/detyam-i-roditelyam/"
+#BASE_URL = "https://ast.ru/cat/detyam-i-roditelyam/"
+#BASE_URL = "https://ast.ru/cat/shkolnaya-uchebnaya-literatura/"
+#BASE_URL = "https://ast.ru/cat/psikhologiya-i-razvitie-lichnosti/"
+#BASE_URL = "https://ast.ru/cat/nauchno-populyarnaya-literatura/"
+#BASE_URL = "https://ast.ru/cat/inostrannyeyazyki/"
+#BASE_URL = "https://ast.ru/cat/iskusstvo-i-kultura/"
+#BASE_URL = "https://ast.ru/cat/istoricheskaya-i-voennaya-literatura/"
+#BASE_URL = "https://ast.ru/cat/zdorove-krasota-sport/"
+BASE_URL = "https://ast.ru/cat/eda-i-napitki/"
 
 # Всего страниц в каталоге (по данным сайта, см. PAGEN_1=2355 в пагинации)
 MAX_PAGES = 2355
 
 # Имя выходного файла для сохранения ссылок
-OUTPUT_FILE = Path(__file__).parent / "deti.txt"
+OUTPUT_FILE = Path(__file__).parent / "eda88.txt"
 
 # ==============================================================================
 # НАСТРОЙКИ
