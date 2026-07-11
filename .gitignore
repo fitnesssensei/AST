@@ -1,0 +1,71 @@
+# ───────────────────────────────────────────────────────────
+# Python
+# ───────────────────────────────────────────────────────────
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+.ENV/
+
+# Type checkers / linters / formatters caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+
+# Environments / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# ───────────────────────────────────────────────────────────
+# Data / generated files (по запросу: все txt, json, md)
+# ───────────────────────────────────────────────────────────
+*.txt
+# Исключение: зависимости проекта должны быть в репозитории
+!requirements.txt
+*.json
+*.md

@@ -27,10 +27,10 @@ import sys
 # ---------- НАСТРОЙКИ ----------
 
 # Входной JSON/NDJSON файл для обработки
-INPUT_FILE = 'JSONSS/books100_deduped.json'
+INPUT_FILE = 'JSONSS/religi.json'
 
 # Выходной файл (результат)
-OUTPUT_FILE = 'JSONSS/books100_clean.json'
+OUTPUT_FILE = 'JSONSS/religiClean.json'
 
 # Список полей, которые нужно удалить из каждой записи.
 # Оставьте список пустым [], если ничего удалять не нужно.
@@ -42,6 +42,9 @@ DELETE_FIELDS = [
     # 'rating',
 ]
 
+# Добавлять запятую после каждой книги (кроме последней).
+# Полезно, если потом нужно обернуть весь вывод в [ ] для валидного JSON-массива.
+ADD_COMMAS = False
 
 # ---------- НОРМАЛИЗАЦИЯ ISBN ----------
 
@@ -230,16 +233,26 @@ def delete_fields(records, fields):
 
 # ---------- СОХРАНЕНИЕ ----------
 
-def save_pretty(records, path):
-    """Сохранить список записей в том же pretty-формате, что и вход.
+def save_pretty(records, path, add_commas=True):
+    """Сохранить список записей в pretty-формате.
 
     Каждый объект печатается с отступом 2, как в sparseno/books100.json.
-    Между объектами — пустая строка, без запятых и без обёрточных [ ].
+    Между объектами — пустая строка.
+
+    Args:
+        records: список словарей-записей.
+        path: путь к выходному файлу.
+        add_commas: если True — добавить запятую после каждой книги
+                    (кроме последней). Полезно, чтобы потом обернуть
+                    весь вывод в [ ] для валидного JSON-массива.
     """
     with open(path, 'w', encoding='utf-8') as f:
         for i, r in enumerate(records):
             if i > 0:
-                f.write('\n')  # пустая строка-разделитель между объектами
+                if add_commas:
+                    f.write(',\n\n')  # запятая и пустая строка-разделитель
+                else:
+                    f.write('\n')  # пустая строка-разделитель между объектами
             # ensure_ascii=False — чтобы кириллица не превращалась в \uXXXX
             f.write(json.dumps(r, ensure_ascii=False, indent=2))
             f.write('\n')
@@ -254,6 +267,7 @@ def main(argv=None):
     input_path = INPUT_FILE
     output_path = OUTPUT_FILE
     keep = 'first'
+    add_commas = ADD_COMMAS
 
     # Позиционные аргументы (необязательные): input output [first|last]
     # Переопределяют настройки из файла
@@ -263,6 +277,11 @@ def main(argv=None):
         output_path = argv[1]
     if len(argv) >= 3:
         keep = argv[2].lower()
+    if len(argv) >= 4:
+        add_commas = argv[3].lower() in ('1', 'true', 'yes', '--commas')
+
+    # Flag --commas can be passed anywhere
+    add_commas = add_commas or '--commas' in argv
 
     if keep not in ('first', 'last'):
         print("Ошибка: keep должен быть 'first' или 'last'")
@@ -286,7 +305,7 @@ def main(argv=None):
 
     if not records:
         print(f"Внимание: в {input_path} не найдено ни одной записи")
-        save_pretty([], output_path)
+        save_pretty([], output_path, add_commas=add_commas)
         return 0
 
     total = len(records)
@@ -315,7 +334,7 @@ def main(argv=None):
     unique_isbn = len(isbn_counter)
     isbn_dup_groups = sum(1 for v in isbn_counter.values() if v > 1)
 
-    save_pretty(deduped, output_path)
+    save_pretty(deduped, output_path, add_commas=add_commas)
 
     print(f"Исходный файл:           {input_path}")
     print(f"Всего записей:            {total}")
@@ -327,6 +346,7 @@ def main(argv=None):
     print(f"Записей после дедупа:     {len(deduped)}")
     print(f"Режим keep:               {keep}")
     print(f"Результат:                {output_path}")
+    print(f"Запятые между книгами:    {'да' if add_commas else 'нет'}")
     return 0
 
 

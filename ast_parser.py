@@ -55,13 +55,23 @@ import requests
 #BASE_URL = "https://ast.ru/cat/eda-i-napitki/"
 #BASE_URL = "https://ast.ru/cat/astrologiya-ezoterika/"
 #BASE_URL = "https://ast.ru/cat/khobbi-i-dosug/"
-BASE_URL = "https://ast.ru/cat/dom-sad-ogorod/"
+#BASE_URL = "https://ast.ru/cat/dom-sad-ogorod/"
+#BASE_URL = "https://ast.ru/cat/puteshestviya/"
+#BASE_URL = "https://ast.ru/cat/biznes-literatura/"
+#BASE_URL = "https://ast.ru/cat/obshchestvo-politika-pravo/"
+#BASE_URL = "https://ast.ru/cat/filosofiya/"
+#BASE_URL = "https://ast.ru/cat/religiya/"
+#BASE_URL = "https://ast.ru/cat/publitsistika-esseistika/"
+#BASE_URL = "https://ast.ru/cat/entsiklopedii/"
+#BASE_URL = "https://ast.ru/cat/litsenzionnye-izdaniya/"
+#BASE_URL = "https://ast.ru/cat/ezhednevniki-dnevniki-bloknoty/"
+BASE_URL = "https://ast.ru/cat/knigi-v-podarok/"
 
 # Всего страниц в каталоге (по данным сайта, см. PAGEN_1=2355 в пагинации)
 MAX_PAGES = 2355
 
 # Имя выходного файла для сохранения ссылок
-OUTPUT_FILE = Path(__file__).parent / "ogorod107.txt"
+OUTPUT_FILE = Path(__file__).parent / "podaroc94.txt"
 
 # ==============================================================================
 # НАСТРОЙКИ
